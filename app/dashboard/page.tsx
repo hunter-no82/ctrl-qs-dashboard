@@ -1,0 +1,969 @@
+'use client';
+import { useEffect, useRef, useState } from 'react';
+import { createClient } from '../../lib/supabase/client';
+import { useRouter } from 'next/navigation';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+
+interface Summary {
+  impressions: number;
+  clicks: number;
+  ctr: number;
+  cpc: number;
+  spend: number;
+}
+
+interface TrendPoint {
+  date: string;
+  impressions: number;
+  clicks: number;
+  ctr: number;
+  spend: number;
+}
+
+type MetricKey = 'impressions' | 'clicks' | 'ctr' | 'spend';
+
+const metricConfig: Record<MetricKey, { label: string; color: string; formatValue: (v: number) => string }> = {
+  impressions: { label: 'Impressions', color: '#55d1bc', formatValue: (v) => v.toLocaleString() },
+  clicks: { label: 'Clicks', color: '#796ffb', formatValue: (v) => v.toLocaleString() },
+  ctr: { label: 'CTR', color: '#cff748', formatValue: (v) => `${v.toFixed(2)}%` },
+  spend: { label: 'Spend', color: '#270428', formatValue: (v) => `€${v.toFixed(2)}` },
+};
+
+interface Campaign {
+  id: number;
+  name: string;
+  status: string;
+}
+
+interface Company {
+  orgId: string;
+  impressions: number;
+  clicks: number;
+  profileUrl: string;
+}
+
+interface CampaignOverviewRow {
+  id: number;
+  name: string;
+  status: string;
+  impressions: number;
+  clicks: number;
+  spend: number;
+}
+
+function formatDateLabel(dateStr: string) {
+  const [year, month, day] = dateStr.split('-').map(Number);
+  const date = new Date(year, month - 1, day);
+  const monthName = date.toLocaleString('en-US', { month: 'short' });
+  const dayNum = date.getDate();
+  return `${monthName} ${dayNum}, ${year}`;
+}
+
+const rangeLabels: Record<string, string> = {
+  week: 'Last 7 days',
+  last30: 'Last 30 days',
+  all: 'Since beginning',
+};
+
+const compareColors = ['#55d1bc', '#796ffb', '#cff748', '#270428', '#2f9c86', '#a89cff'];
+
+const FS_TAGS = ['fs1', 'fs2', 'fs3', 'fs4', 'fs5'];
+
+function fsTagLabel(tag: string) {
+  return `Flagship Solution ${tag.slice(2)}`;
+}
+
+function isFsCampaign(name: string) {
+  const lower = name.toLowerCase();
+  return FS_TAGS.some((tag) => lower.includes(tag));
+}
+
+function campaignIdsForTag(campaigns: Campaign[], tag: string) {
+  return campaigns.filter((c) => c.name.toLowerCase().includes(tag)).map((c) => c.id);
+}
+
+const statusColors: Record<string, string> = {
+  ACTIVE: '#2f9c86',
+  PAUSED: '#c98a1f',
+  COMPLETED: '#6b7280',
+  DRAFT: '#9ca3af',
+  ARCHIVED: '#4b5563',
+  CANCELED: '#b3413a',
+};
+
+function statusColor(status: string) {
+  return statusColors[status] || '#6b7280';
+}
+
+type SortField = 'impressions' | 'clicks';
+type SortDirection = 'asc' | 'desc';
+
+export default function DashboardPage() {
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [summary, setSummary] = useState<Summary | null>(null);
+  const [trend, setTrend] = useState<TrendPoint[]>([]);
+  const [dataLoading, setDataLoading] = useState(true);
+  const [range, setRange] = useState('week');
+  const [selectedMetric, setSelectedMetric] = useState<MetricKey>('impressions');
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [selectedFsTag, setSelectedFsTag] = useState('');
+  const [selectedCampaign, setSelectedCampaign] = useState('');
+  const [drillSearch, setDrillSearch] = useState('');
+  const [drillDropdownOpen, setDrillDropdownOpen] = useState(false);
+  const [compareMode, setCompareMode] = useState(false);
+  const [compareIds, setCompareIds] = useState<string[]>([]);
+  const [compareTrend, setCompareTrend] = useState<any[]>([]);
+  const [compareSearch, setCompareSearch] = useState('');
+  const [compareDropdownOpen, setCompareDropdownOpen] = useState(false);
+  const [overviewMode, setOverviewMode] = useState(false);
+  const [campaignOverview, setCampaignOverview] = useState<CampaignOverviewRow[]>([]);
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
+  const [overviewLoading, setOverviewLoading] = useState(false);
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [sortField, setSortField] = useState<SortField>('impressions');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+  const [companyPage, setCompanyPage] = useState(0);
+  const [companyNames, setCompanyNames] = useState<Record<string, string>>({});
+  const [editingOrgId, setEditingOrgId] = useState<string | null>(null);
+  const [nameInput, setNameInput] = useState('');
+  const [pdfLoading, setPdfLoading] = useState(false);
+  const reportRef = useRef<HTMLDivElement>(null);
+  const router = useRouter();
+
+  useEffect(() => {
+    const supabase = createClient();
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!session) {
+        router.push('/login');
+      } else {
+        setUserEmail(session.user.email ?? null);
+        setLoading(false);
+      }
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!session) {
+        router.push('/login');
+      } else {
+        setUserEmail(session.user.email ?? null);
+        setLoading(false);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, [router]);
+
+  useEffect(() => {
+    fetch('/api/linkedin-campaigns')
+      .then((res) => res.json())
+      .then((data) => setCampaigns(data.campaigns || []))
+      .catch(() => setCampaigns([]));
+  }, []);
+
+  useEffect(() => {
+    fetch('/api/company-names')
+      .then((res) => res.json())
+      .then((data) => setCompanyNames(data.names || {}))
+      .catch(() => setCompanyNames({}));
+  }, []);
+
+  useEffect(() => {
+    if (compareMode || overviewMode) return;
+    setDataLoading(true);
+    const campaignParam = selectedCampaign
+      ? `&campaignId=${selectedCampaign}`
+      : selectedFsTag
+      ? `&campaignIds=${campaignIdsForTag(campaigns, selectedFsTag).join(',')}`
+      : '';
+    fetch(`/api/linkedin-analytics?range=${range}${campaignParam}`)
+      .then((res) => res.json())
+      .then((data) => {
+        setSummary(data.summary);
+        setTrend(data.trend || []);
+        setDataLoading(false);
+      })
+      .catch(() => setDataLoading(false));
+  }, [range, selectedCampaign, selectedFsTag, campaigns, compareMode, overviewMode]);
+
+  useEffect(() => {
+    if (!compareMode || compareIds.length < 2) return;
+    setDataLoading(true);
+    fetch(`/api/linkedin-compare?range=${range}&campaignIds=${compareIds.join(',')}`)
+      .then((res) => res.json())
+      .then((data) => {
+        setCompareTrend(data.trend || []);
+        setDataLoading(false);
+      })
+      .catch(() => setDataLoading(false));
+  }, [range, compareIds, compareMode]);
+
+  useEffect(() => {
+    if (compareMode || overviewMode) {
+      setCompanies([]);
+      return;
+    }
+    const campaignParam = selectedCampaign
+      ? `&campaignId=${selectedCampaign}`
+      : selectedFsTag
+      ? `&campaignIds=${campaignIdsForTag(campaigns, selectedFsTag).join(',')}`
+      : '';
+    fetch(`/api/linkedin-companies?range=${range}${campaignParam}`)
+      .then((res) => res.json())
+      .then((data) => {
+        setCompanies(data.companies || []);
+        setCompanyPage(0);
+      })
+      .catch(() => setCompanies([]));
+  }, [selectedCampaign, selectedFsTag, campaigns, range, compareMode, overviewMode]);
+
+  useEffect(() => {
+    setCompanyPage(0);
+  }, [sortField, sortDirection]);
+
+  useEffect(() => {
+    if (!overviewMode || campaigns.length === 0) return;
+    setDataLoading(true);
+    setOverviewLoading(true);
+    fetch('/api/linkedin-campaign-overview')
+      .then((res) => res.json())
+      .then((data) => {
+        const spendByCampaignId = data.spendByCampaignId || {};
+        const rows: CampaignOverviewRow[] = campaigns
+          .filter((c) => isFsCampaign(c.name))
+          .map((c) => ({
+            id: c.id,
+            name: c.name,
+            status: c.status,
+            impressions: spendByCampaignId[c.id]?.impressions || 0,
+            clicks: spendByCampaignId[c.id]?.clicks || 0,
+            spend: spendByCampaignId[c.id]?.spend || 0,
+          }))
+          .sort((a, b) => b.spend - a.spend);
+        setCampaignOverview(rows);
+        setOverviewLoading(false);
+        setDataLoading(false);
+      })
+      .catch(() => {
+        setOverviewLoading(false);
+        setDataLoading(false);
+      });
+  }, [overviewMode, campaigns]);
+
+  const toggleCompareId = (id: string) => {
+    setCompareIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
+
+  const toggleGroupExpanded = (tag: string) => {
+    setExpandedGroups((prev) => ({ ...prev, [tag]: !prev[tag] }));
+  };
+
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortDirection(sortDirection === 'desc' ? 'asc' : 'desc');
+    } else {
+      setSortField(field);
+      setSortDirection('desc');
+    }
+  };
+
+  const saveCompanyName = async (orgId: string) => {
+    if (!nameInput.trim()) return;
+    const res = await fetch('/api/company-names', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orgId, companyName: nameInput.trim() }),
+    });
+    if (res.ok) {
+      setCompanyNames((prev) => ({ ...prev, [orgId]: nameInput.trim() }));
+      setEditingOrgId(null);
+      setNameInput('');
+    }
+  };
+
+  const handleSignOut = async () => {
+    const supabase = createClient();
+    await supabase.auth.signOut();
+  };
+
+  const handleDownloadPdf = async () => {
+    if (!reportRef.current) return;
+    setPdfLoading(true);
+    try {
+      const [{ domToCanvas }, { default: jsPDF }] = await Promise.all([
+        import('modern-screenshot'),
+        import('jspdf'),
+      ]);
+
+      const canvas = await domToCanvas(reportRef.current, {
+        scale: 2,
+        backgroundColor: '#FAFAF7',
+      });
+
+      const pdf = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const imgWidth = pageWidth;
+      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+
+      const imgData = canvas.toDataURL('image/png');
+      let heightLeft = imgHeight;
+      let position = 0;
+
+      pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
+      heightLeft -= pageHeight;
+
+      while (heightLeft > 0) {
+        position = heightLeft - imgHeight;
+        pdf.addPage();
+        pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
+        heightLeft -= pageHeight;
+      }
+
+      const scopeSlug = (compareMode ? 'fs-comparison' : selectedCampaignName)
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/(^-|-$)/g, '');
+
+      pdf.save(`ctrl-qs-report-${scopeSlug}-${range}.pdf`);
+    } finally {
+      setPdfLoading(false);
+    }
+  };
+
+  if (loading) return <div className="p-10">Authenticating...</div>;
+
+  const selectedCampaignName = selectedCampaign
+    ? campaigns.find((c) => String(c.id) === selectedCampaign)?.name || 'Selected campaign'
+    : selectedFsTag
+    ? `${fsTagLabel(selectedFsTag)} combined`
+    : 'All Flagship Solutions combined';
+
+  const fsCampaigns = campaigns.filter((c) => isFsCampaign(c.name));
+
+  const filteredCampaigns = fsCampaigns.filter((c) =>
+    c.name.toLowerCase().includes(compareSearch.toLowerCase())
+  );
+
+  const selectedTagCampaigns = selectedFsTag
+    ? campaigns.filter((c) => c.name.toLowerCase().includes(selectedFsTag))
+    : [];
+
+  const filteredDrillCampaigns = selectedTagCampaigns.filter((c) =>
+    c.name.toLowerCase().includes(drillSearch.toLowerCase())
+  );
+
+  const overviewGroups = FS_TAGS.map((tag) => {
+    const rows = campaignOverview.filter((c) => c.name.toLowerCase().includes(tag));
+    return {
+      tag,
+      label: fsTagLabel(tag),
+      rows,
+      spend: rows.reduce((sum, r) => sum + r.spend, 0),
+      impressions: rows.reduce((sum, r) => sum + r.impressions, 0),
+      clicks: rows.reduce((sum, r) => sum + r.clicks, 0),
+    };
+  }).filter((g) => g.rows.length > 0);
+
+  const sortedCompanies = [...companies].sort((a, b) => {
+    const diff = a[sortField] - b[sortField];
+    return sortDirection === 'desc' ? -diff : diff;
+  });
+
+  const COMPANIES_PER_PAGE = 20;
+  const totalCompanyPages = Math.max(1, Math.ceil(sortedCompanies.length / COMPANIES_PER_PAGE));
+  const pagedCompanies = sortedCompanies.slice(
+    companyPage * COMPANIES_PER_PAGE,
+    companyPage * COMPANIES_PER_PAGE + COMPANIES_PER_PAGE
+  );
+
+  const maxCompanyImpressions = Math.max(1, ...companies.map((c) => c.impressions));
+  const maxCompanyClicks = Math.max(1, ...companies.map((c) => c.clicks));
+
+  const sortArrow = (field: SortField) => {
+    if (sortField !== field) return '';
+    return sortDirection === 'desc' ? ' ↓' : ' ↑';
+  };
+
+  return (
+    <div className="relative min-h-screen overflow-hidden" style={{ backgroundColor: '#FAFAF7' }}>
+      <img
+        src="/ctrl-qs-circles.png"
+        alt=""
+        aria-hidden="true"
+        className="absolute pointer-events-none select-none"
+        style={{ top: -40, right: -40, width: 220, opacity: 0.14 }}
+      />
+      <img
+        src="/ctrl-qs-circles.png"
+        alt=""
+        aria-hidden="true"
+        className="absolute pointer-events-none select-none"
+        style={{ bottom: -30, left: -30, width: 170, opacity: 0.1, transform: 'rotate(180deg)' }}
+      />
+      <div className="relative p-10">
+      <div className="flex justify-between items-center mb-8">
+        <img src="/ctrl-qs-logo.png" alt="ctrl QS" className="h-9" />
+        <button
+          onClick={handleSignOut}
+          className="text-white px-4 py-2 rounded font-medium"
+          style={{ backgroundColor: '#270428' }}
+        >
+          Sign Out
+        </button>
+      </div>
+
+      <div className="flex flex-wrap justify-between items-center gap-4 mb-4">
+        <p className="text-gray-500">
+          {overviewMode
+            ? 'All Flagship Solution campaigns'
+            : compareMode
+            ? 'Comparing Flagship Solutions'
+            : `${rangeLabels[range]} · ${selectedCampaignName}`}
+        </p>
+        <div className="flex gap-3 items-center">
+          <button
+            onClick={() => {
+              setOverviewMode(!overviewMode);
+              setCompareMode(false);
+            }}
+            className={`px-3 py-2 rounded border text-sm font-medium ${
+              overviewMode ? 'text-white' : 'bg-white text-gray-700'
+            }`}
+            style={overviewMode ? { backgroundColor: '#270428' } : undefined}
+          >
+            {overviewMode ? '← Back to Dashboard' : 'Campaign Overview'}
+          </button>
+          <button
+            onClick={() => {
+              setCompareMode(!compareMode);
+              setOverviewMode(false);
+            }}
+            className={`px-3 py-2 rounded border text-sm font-medium ${
+              compareMode ? 'text-white' : 'bg-white text-gray-700'
+            }`}
+            style={compareMode ? { backgroundColor: '#270428' } : undefined}
+          >
+            {compareMode ? '← Back to Dashboard' : 'Compare Flagship Solutions'}
+          </button>
+          {!compareMode && !overviewMode && (
+            <div className="relative">
+              <span className="absolute -top-5 left-0 text-xs text-gray-400 font-medium uppercase tracking-wide">
+                Flagship Solution
+              </span>
+              <select
+                className="p-2 border rounded bg-white w-56"
+                value={selectedFsTag}
+                onChange={(e) => {
+                  setSelectedFsTag(e.target.value);
+                  setSelectedCampaign('');
+                  setDrillSearch('');
+                }}
+              >
+                <option value="">All Flagship Solutions</option>
+                {FS_TAGS.map((tag) => (
+                  <option key={tag} value={tag}>
+                    {fsTagLabel(tag)}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          {!compareMode && !overviewMode && selectedFsTag && (
+            <div
+              className="relative w-64"
+              tabIndex={-1}
+              onBlur={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                  setDrillDropdownOpen(false);
+                }
+              }}
+            >
+              <span className="absolute -top-5 left-0 text-xs text-gray-400 font-medium uppercase tracking-wide">
+                Drill into a campaign (optional)
+              </span>
+              <input
+                type="text"
+                placeholder={
+                  selectedCampaign
+                    ? campaigns.find((c) => String(c.id) === selectedCampaign)?.name || 'Selected campaign'
+                    : `All ${fsTagLabel(selectedFsTag)} campaigns`
+                }
+                className="w-full p-2 border rounded bg-white"
+                value={drillSearch}
+                onChange={(e) => setDrillSearch(e.target.value)}
+                onFocus={() => setDrillDropdownOpen(true)}
+              />
+              {drillDropdownOpen && (
+                <div className="absolute z-10 mt-1 w-full bg-white border rounded shadow-lg max-h-[190px] overflow-y-auto">
+                  <label className="w-full flex items-center gap-2 p-2 text-sm hover:bg-gray-100 font-medium cursor-pointer">
+                    <input
+                      type="radio"
+                      name="drill-campaign"
+                      checked={selectedCampaign === ''}
+                      onChange={() => {
+                        setSelectedCampaign('');
+                        setDrillSearch('');
+                        setDrillDropdownOpen(false);
+                      }}
+                    />
+                    All {fsTagLabel(selectedFsTag)} campaigns
+                  </label>
+                  {filteredDrillCampaigns.length === 0 ? (
+                    <p className="p-2 text-sm text-gray-400">No matching campaigns</p>
+                  ) : (
+                    filteredDrillCampaigns.map((c) => (
+                      <label
+                        key={c.id}
+                        className="w-full flex items-center gap-2 p-2 text-sm hover:bg-gray-100 cursor-pointer"
+                      >
+                        <input
+                          type="radio"
+                          name="drill-campaign"
+                          checked={selectedCampaign === String(c.id)}
+                          onChange={() => {
+                            setSelectedCampaign(String(c.id));
+                            setDrillSearch('');
+                            setDrillDropdownOpen(false);
+                          }}
+                        />
+                        <span>
+                          {c.name}{' '}
+                          <span className="text-xs text-gray-400">({c.status})</span>
+                        </span>
+                      </label>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+          {!overviewMode && (
+            <select
+              className="p-2 border rounded bg-white"
+              value={range}
+              onChange={(e) => setRange(e.target.value)}
+            >
+              <option value="week">Last 7 Days</option>
+              <option value="last30">Last 30 Days</option>
+              <option value="all">Since Beginning</option>
+            </select>
+          )}
+          <button
+            onClick={handleDownloadPdf}
+            disabled={
+              pdfLoading ||
+              dataLoading ||
+              (overviewMode ? campaignOverview.length === 0 : !summary && compareTrend.length === 0)
+            }
+            className="px-3 py-2 rounded border text-sm font-medium bg-white text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {pdfLoading ? 'Preparing PDF…' : 'Download PDF'}
+          </button>
+        </div>
+      </div>
+
+      {compareMode && (
+        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 mb-6">
+          <p className="text-sm text-gray-500 mb-2">Select 2 or more Flagship Solutions to compare:</p>
+
+          {compareIds.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-3">
+              {compareIds.map((id) => {
+                const c = campaigns.find((camp) => String(camp.id) === id);
+                return (
+                  <span
+                    key={id}
+                    className="flex items-center gap-1 bg-gray-800 text-white text-sm px-3 py-1 rounded-full"
+                  >
+                    {c?.name || id}
+                    <button
+                      onClick={() => toggleCompareId(id)}
+                      className="ml-1 text-gray-300 hover:text-white"
+                    >
+                      ×
+                    </button>
+                  </span>
+                );
+              })}
+            </div>
+          )}
+
+          <div
+            className="relative"
+            tabIndex={-1}
+            onBlur={(e) => {
+              if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                setCompareDropdownOpen(false);
+              }
+            }}
+          >
+            <input
+              type="text"
+              placeholder="Type to search Flagship Solutions..."
+              className="w-full p-2 border rounded"
+              value={compareSearch}
+              onChange={(e) => setCompareSearch(e.target.value)}
+              onFocus={() => setCompareDropdownOpen(true)}
+            />
+            {compareDropdownOpen && (
+              <div className="absolute z-10 mt-1 w-full bg-white border rounded shadow-lg max-h-[190px] overflow-y-auto">
+                {filteredCampaigns.length === 0 ? (
+                  <p className="p-2 text-sm text-gray-400">No matching Flagship Solutions</p>
+                ) : (
+                  filteredCampaigns.map((c) => (
+                    <label
+                      key={c.id}
+                      className="w-full flex items-center gap-2 p-2 text-sm hover:bg-gray-100 cursor-pointer"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={compareIds.includes(String(c.id))}
+                        onChange={() => toggleCompareId(String(c.id))}
+                      />
+                      {c.name}
+                    </label>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div ref={reportRef}>
+      {dataLoading ? (
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 mb-8">
+          Loading live campaign data...
+        </div>
+      ) : overviewMode ? (
+        campaignOverview.length === 0 ? (
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+            No Flagship Solution campaigns found.
+          </div>
+        ) : (
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+            <h3 className="font-bold mb-1">Campaign Overview</h3>
+            <p className="text-sm text-gray-400 mb-4">
+              Investment to date by Flagship Solution, across every campaign regardless of status.
+            </p>
+            <table className="min-w-full">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="p-3 text-left text-sm text-gray-500">Campaign</th>
+                  <th className="p-3 text-left text-sm text-gray-500">Status</th>
+                  <th className="p-3 text-left text-sm text-gray-500">Investment to Date</th>
+                  <th className="p-3 text-left text-sm text-gray-500">Impressions</th>
+                  <th className="p-3 text-left text-sm text-gray-500">Clicks</th>
+                </tr>
+              </thead>
+              {overviewGroups.map((group) => {
+                const isExpanded = !!expandedGroups[group.tag];
+                return (
+                  <tbody key={group.tag}>
+                    <tr
+                      className="border-t bg-gray-50 font-bold cursor-pointer select-none hover:bg-gray-100"
+                      onClick={() => toggleGroupExpanded(group.tag)}
+                    >
+                      <td className="p-3">
+                        <span className="inline-flex items-center gap-2">
+                          <span
+                            className="inline-block text-gray-400 transition-transform"
+                            style={{ transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)' }}
+                          >
+                            ▶
+                          </span>
+                          {group.label}
+                        </span>
+                      </td>
+                      <td className="p-3 text-xs font-normal text-gray-400">{group.rows.length} campaigns</td>
+                      <td className="p-3">€{group.spend.toFixed(2)}</td>
+                      <td className="p-3">{group.impressions.toLocaleString()}</td>
+                      <td className="p-3">{group.clicks.toLocaleString()}</td>
+                    </tr>
+                    {isExpanded &&
+                      group.rows.map((c) => (
+                        <tr key={c.id} className="border-t text-sm text-gray-600">
+                          <td className="p-3 pl-8">{c.name}</td>
+                          <td className="p-3">
+                            <span
+                              className="text-xs font-medium px-2 py-1 rounded-full text-white"
+                              style={{ backgroundColor: statusColor(c.status) }}
+                            >
+                              {c.status}
+                            </span>
+                          </td>
+                          <td className="p-3">€{c.spend.toFixed(2)}</td>
+                          <td className="p-3">{c.impressions.toLocaleString()}</td>
+                          <td className="p-3">{c.clicks.toLocaleString()}</td>
+                        </tr>
+                      ))}
+                  </tbody>
+                );
+              })}
+              <tbody>
+                <tr className="border-t font-bold bg-gray-50">
+                  <td className="p-3" colSpan={2}>Total</td>
+                  <td className="p-3">
+                    €{campaignOverview.reduce((sum, c) => sum + c.spend, 0).toFixed(2)}
+                  </td>
+                  <td className="p-3">
+                    {campaignOverview.reduce((sum, c) => sum + c.impressions, 0).toLocaleString()}
+                  </td>
+                  <td className="p-3">
+                    {campaignOverview.reduce((sum, c) => sum + c.clicks, 0).toLocaleString()}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        )
+      ) : compareMode ? (
+        compareIds.length < 2 ? (
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+            Select at least 2 campaigns above to see a comparison.
+          </div>
+        ) : (
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 h-80">
+            <h3 className="font-bold mb-4">Impressions Comparison</h3>
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={compareTrend}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="date" tickFormatter={formatDateLabel} />
+                <YAxis />
+                <Tooltip labelFormatter={formatDateLabel} />
+                <Legend />
+                {compareIds.map((id, i) => (
+                  <Line
+                    key={id}
+                    type="monotone"
+                    dataKey={id}
+                    name={campaigns.find((c) => String(c.id) === id)?.name || id}
+                    stroke={compareColors[i % compareColors.length]}
+                    strokeWidth={2}
+                  />
+                ))}
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        )
+      ) : summary ? (
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+              <div className="h-1" style={{ backgroundColor: '#55d1bc' }} />
+              <div className="p-6">
+                <p className="text-gray-500 text-sm font-medium uppercase tracking-wider">Impressions</p>
+                <p className="text-3xl font-bold mt-2">{summary.impressions.toLocaleString()}</p>
+              </div>
+            </div>
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+              <div className="h-1" style={{ backgroundColor: '#796ffb' }} />
+              <div className="p-6">
+                <p className="text-gray-500 text-sm font-medium uppercase tracking-wider">Clicks</p>
+                <p className="text-3xl font-bold mt-2">{summary.clicks.toLocaleString()}</p>
+              </div>
+            </div>
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+              <div className="h-1" style={{ backgroundColor: '#cff748' }} />
+              <div className="p-6">
+                <p className="text-gray-500 text-sm font-medium uppercase tracking-wider">CTR</p>
+                <p className="text-3xl font-bold mt-2">{summary.ctr.toFixed(2)}%</p>
+              </div>
+            </div>
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+              <div className="h-1" style={{ backgroundColor: '#270428' }} />
+              <div className="p-6">
+                <p className="text-gray-500 text-sm font-medium uppercase tracking-wider">Cost per Click</p>
+                <p className="text-3xl font-bold mt-2">€{summary.cpc.toFixed(2)}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 h-80">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="font-bold">{metricConfig[selectedMetric].label} Trend</h3>
+              <select
+                className="p-2 border rounded bg-white text-sm"
+                value={selectedMetric}
+                onChange={(e) => setSelectedMetric(e.target.value as MetricKey)}
+              >
+                <option value="impressions">Impressions</option>
+                <option value="clicks">Clicks</option>
+                <option value="ctr">CTR</option>
+                <option value="spend">Spend</option>
+              </select>
+            </div>
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={trend}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="date" tickFormatter={formatDateLabel} />
+                <YAxis tickFormatter={(v) => metricConfig[selectedMetric].formatValue(v)} />
+                <Tooltip
+                  labelFormatter={formatDateLabel}
+                  formatter={(value: number) => [metricConfig[selectedMetric].formatValue(value), metricConfig[selectedMetric].label]}
+                />
+                <Line
+                  type="monotone"
+                  dataKey={selectedMetric}
+                  stroke={metricConfig[selectedMetric].color}
+                  strokeWidth={2}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+
+          {companies.length > 0 && (
+            <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 mt-8">
+              <h3 className="font-bold mb-1">
+                {selectedCampaign
+                  ? `Companies Engaging with ${selectedCampaignName}`
+                  : selectedFsTag
+                  ? `Companies Engaging with ${fsTagLabel(selectedFsTag)}`
+                  : 'Companies Engaging Across All Flagship Solutions'}
+              </h3>
+              <p className="text-sm text-gray-400 mb-4">
+                Tag companies with real names as you identify them — it'll remember them everywhere.
+              </p>
+              <table className="min-w-full">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="p-3 text-left text-sm text-gray-500">Company</th>
+                    <th
+                      className="p-3 text-left text-sm text-gray-500 cursor-pointer select-none hover:text-gray-700"
+                      onClick={() => handleSort('impressions')}
+                    >
+                      Impressions{sortArrow('impressions')}
+                    </th>
+                    <th
+                      className="p-3 text-left text-sm text-gray-500 cursor-pointer select-none hover:text-gray-700"
+                      onClick={() => handleSort('clicks')}
+                    >
+                      Clicks{sortArrow('clicks')}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pagedCompanies.map((c) => (
+                    <tr key={c.orgId} className="border-t">
+                      <td className="p-3">
+                        {companyNames[c.orgId] ? (
+                          <a
+                            href={c.profileUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-blue-600 hover:underline font-medium"
+                          >
+                            {companyNames[c.orgId]}
+                          </a>
+                        ) : editingOrgId === c.orgId ? (
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              autoFocus
+                              placeholder="Company name"
+                              className="border rounded p-1 text-sm"
+                              value={nameInput}
+                              onChange={(e) => setNameInput(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') saveCompanyName(c.orgId);
+                              }}
+                            />
+                            <button
+                              onClick={() => saveCompanyName(c.orgId)}
+                              className="text-xs bg-gray-800 text-white px-2 py-1 rounded"
+                            >
+                              Save
+                            </button>
+                            <button
+                              onClick={() => setEditingOrgId(null)}
+                              className="text-xs text-gray-400"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <a
+                              href={c.profileUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-blue-600 hover:underline"
+                            >
+                              View company (ID: {c.orgId})
+                            </a>
+                            <button
+                              onClick={() => {
+                                setEditingOrgId(c.orgId);
+                                setNameInput('');
+                              }}
+                              className="text-xs text-gray-400 hover:text-gray-700 underline"
+                            >
+                              + Add name
+                            </button>
+                          </div>
+                        )}
+                      </td>
+                      <td className="p-3 relative">
+                        <div
+                          className="absolute inset-y-1 left-0 rounded"
+                          style={{
+                            width: `${(c.impressions / maxCompanyImpressions) * 100}%`,
+                            backgroundColor: '#55d1bc',
+                            opacity: 0.4,
+                          }}
+                        />
+                        <span className="relative">{c.impressions.toLocaleString()}</span>
+                      </td>
+                      <td className="p-3 relative">
+                        <div
+                          className="absolute inset-y-1 left-0 rounded"
+                          style={{
+                            width: `${(c.clicks / maxCompanyClicks) * 100}%`,
+                            backgroundColor: '#796ffb',
+                            opacity: 0.4,
+                          }}
+                        />
+                        <span className="relative">{c.clicks.toLocaleString()}</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {totalCompanyPages > 1 && (
+                <div className="flex justify-between items-center mt-4 text-sm text-gray-500">
+                  <button
+                    onClick={() => setCompanyPage((p) => Math.max(0, p - 1))}
+                    disabled={companyPage === 0}
+                    className="px-3 py-1 rounded border bg-white disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
+                  >
+                    ← Previous
+                  </button>
+                  <span>
+                    Page {companyPage + 1} of {totalCompanyPages}
+                  </span>
+                  <button
+                    onClick={() => setCompanyPage((p) => Math.min(totalCompanyPages - 1, p + 1))}
+                    disabled={companyPage >= totalCompanyPages - 1}
+                    className="px-3 py-1 rounded border bg-white disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
+                  >
+                    Next →
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </>
+      ) : (
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+          Couldn't load campaign data. Please try again shortly.
+        </div>
+      )}
+      </div>
+      </div>
+    </div>
+  );
+}

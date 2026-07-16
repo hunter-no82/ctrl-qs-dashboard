@@ -1,0 +1,38 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(claude mcp *)",
+      "PowerShell(claude mcp add --transport http microsoft-learn https://learn.microsoft.com/api/mcp)",
+      "PowerShell(npm list -g --depth=0 2>&1)",
+      "PowerShell(npm install -g @anthropic-ai/claude-code)",
+      "mcp__microsoft-learn__microsoft_docs_search",
+      "mcp__microsoft-learn__microsoft_docs_fetch",
+      "Bash(curl -s http://localhost:3000/api/linkedin-campaigns)",
+      "Bash(npx tsc *)",
+      "Bash(curl -s \"http://localhost:3000/api/linkedin-campaign-overview\")",
+      "Bash(node -e \"const {jsPDF} = require\\('jspdf'\\); const doc = new jsPDF\\(\\); doc.text\\('hello', 10, 10\\); console.log\\(typeof doc.output\\);\")",
+      "Bash(node generate-fs-report.tmp.js \"C:\\\\Users\\\\JAHun\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-JAHun-my-client-dashboard\\\\c9b38c8f-7961-4e26-8904-80bef2b080a3\\\\scratchpad\\\\flagship-solutions-overview.pdf\")",
+      "Bash(node -e ' *)",
+      "Bash(npm view *)",
+      "Bash(npm install *)",
+      "Bash(node -e \"const m = require\\('modern-screenshot'\\); console.log\\(Object.keys\\(m\\)\\);\")",
+      "Bash(npm uninstall *)",
+      "Bash(curl -s \"http://localhost:3000/api/linkedin-analytics?range=all&campaignIds=798006344,798105004,799006304,799906144\")",
+      "Bash(node generate-fs-report.tmp.js \"C:\\\\Users\\\\JAHun\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-JAHun-my-client-dashboard\\\\c9b38c8f-7961-4e26-8904-80bef2b080a3\\\\scratchpad\\\\flagship-solutions-client-brief.pdf\")",
+      "Bash(curl -s http://localhost:3000/api/company-names)",
+      "Bash(mkdir -p \"/c/Users/JAHun/AppData/Local/Temp/claude/C--Users-JAHun-my-client-dashboard/d39ccd5a-277c-4a73-bd07-990952db1eab/scratchpad\" && echo ok)",
+      "Bash(python build_workbook.py)",
+      "PowerShell(Get-Command python, python3, py -ErrorAction SilentlyContinue)",
+      "PowerShell(python --version)",
+      "PowerShell(node --version; npm --version; where.exe soffice 2>$null; Get-ChildItem -Path \"$env:USERPROFILE\\\\AppData\\\\Roaming\\\\Claude\" -Recurse -Filter \"python.exe\" -ErrorAction SilentlyContinue | Select-Object -First 5 FullName)",
+      "PowerShell(node -e \"console.log\\(require.resolve\\('docx'\\)\\)\" 2>&1)",
+      "Bash(unzip -p No82_Financial_Recovery_Plan.docx word/document.xml)",
+      "Bash(node build_workbook.js)",
+      "Bash(node build_doc.js)",
+      "Bash(gh auth *)",
+      "Bash(git --version)",
+      "Bash(git init *)",
+      "Bash(git add *)"
+    ]
+  }
+}
