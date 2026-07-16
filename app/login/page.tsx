@@ -48,7 +48,7 @@ export default function LoginPage() {
         onSubmit={handleLogin}
         className="relative bg-white rounded-xl shadow-sm border border-gray-100 p-10 w-full max-w-sm flex flex-col gap-4"
       >
-        <img src="/ctrl-qs-logo.png" alt="ctrl QS" className="h-8 mb-2" />
+        <img src="/ctrl-qs-logo.png" alt="ctrl QS" className="h-8 mb-2 self-start" />
 
         <div>
           <h1 className="text-xl font-bold" style={{ color: '#270428' }}>
