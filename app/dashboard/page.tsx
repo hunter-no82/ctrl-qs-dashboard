@@ -734,7 +734,7 @@ export default function DashboardPage() {
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="date" tickFormatter={formatDateLabel} />
                 <YAxis />
-                <Tooltip labelFormatter={formatDateLabel} />
+                <Tooltip labelFormatter={(label) => formatDateLabel(String(label))} />
                 <Legend />
                 {compareIds.map((id, i) => (
                   <Line
@@ -803,8 +803,8 @@ export default function DashboardPage() {
                 <XAxis dataKey="date" tickFormatter={formatDateLabel} />
                 <YAxis tickFormatter={(v) => metricConfig[selectedMetric].formatValue(v)} />
                 <Tooltip
-                  labelFormatter={formatDateLabel}
-                  formatter={(value: number) => [metricConfig[selectedMetric].formatValue(value), metricConfig[selectedMetric].label]}
+                  labelFormatter={(label) => formatDateLabel(String(label))}
+                  formatter={(value) => [metricConfig[selectedMetric].formatValue(Number(value)), metricConfig[selectedMetric].label]}
                 />
                 <Line
                   type="monotone"
