@@ -128,6 +128,7 @@ export default function DashboardPage() {
   const [editingOrgId, setEditingOrgId] = useState<string | null>(null);
   const [nameInput, setNameInput] = useState('');
   const [pdfLoading, setPdfLoading] = useState(false);
+  const [weeklyReportLoading, setWeeklyReportLoading] = useState(false);
   const reportRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
 
@@ -331,6 +332,27 @@ export default function DashboardPage() {
       pdf.save(`ctrl-qs-report-${scopeSlug}-${range}.pdf`);
     } finally {
       setPdfLoading(false);
+    }
+  };
+
+  const handleWeeklyReport = async () => {
+    setWeeklyReportLoading(true);
+    try {
+      const res = await fetch('/api/weekly-report');
+      if (!res.ok) throw new Error('Failed to generate weekly report');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `flagship-solutions-weekly-report-${new Date().toISOString().slice(0, 10)}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      alert('Could not generate the weekly report. Please try again.');
+    } finally {
+      setWeeklyReportLoading(false);
     }
   };
 
@@ -562,6 +584,13 @@ export default function DashboardPage() {
             className="px-3 py-2 rounded border text-sm font-medium bg-white text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {pdfLoading ? 'Preparing PDF…' : 'Download PDF'}
+          </button>
+          <button
+            onClick={handleWeeklyReport}
+            disabled={weeklyReportLoading}
+            className="px-3 py-2 rounded border text-sm font-medium bg-white text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {weeklyReportLoading ? 'Preparing…' : 'Weekly Report'}
           </button>
         </div>
       </div>
