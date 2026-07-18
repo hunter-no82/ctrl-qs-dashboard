@@ -910,14 +910,15 @@ export default function DashboardPage() {
             </ResponsiveContainer>
           </div>
 
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-8">
           {companies.length > 0 && (
-            <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 mt-8">
+            <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
               <h3 className="font-bold mb-1">
                 {selectedCampaign
-                  ? `Companies Engaging with ${selectedCampaignName}`
+                  ? `Companies Viewing ${selectedCampaignName}`
                   : selectedFsTag
-                  ? `Companies Engaging with ${fsTagLabel(selectedFsTag)}`
-                  : 'Companies Engaging Across All Flagship Solutions'}
+                  ? `Companies Viewing ${fsTagLabel(selectedFsTag)}`
+                  : 'Companies Viewing Content Across All Flagship Solutions'}
               </h3>
               <p className="text-sm text-gray-400 mb-4">
                 Tag companies with real names as you identify them — it'll remember them everywhere.
@@ -1052,7 +1053,7 @@ export default function DashboardPage() {
           )}
 
           {jobTitles.length > 0 && (
-            <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 mt-8">
+            <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
               <h3 className="font-bold mb-1">
                 {selectedCampaign
                   ? `Job Titles Viewing ${selectedCampaignName}`
@@ -1061,7 +1062,7 @@ export default function DashboardPage() {
                   : 'Job Titles Viewing Across All Flagship Solutions'}
               </h3>
               <p className="text-sm text-gray-400 mb-4">
-                Pair this with the companies list above to narrow down outreach targets.
+                Pair this with the companies list to narrow down outreach targets.
               </p>
               <table className="min-w-full">
                 <thead className="bg-gray-50">
@@ -1134,6 +1135,7 @@ export default function DashboardPage() {
               )}
             </div>
           )}
+          </div>
         </>
       ) : (
         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
