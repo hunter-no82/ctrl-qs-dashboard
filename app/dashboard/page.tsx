@@ -103,19 +103,8 @@ function statusColor(status: string) {
   return statusColors[status] || '#6b7280';
 }
 
-type SortField = 'impressions' | 'clicks' | 'score';
+type SortField = 'impressions' | 'clicks';
 type SortDirection = 'asc' | 'desc';
-
-const CLICK_WEIGHT = 25;
-
-function priorityScore(impressions: number, clicks: number) {
-  return impressions + clicks * CLICK_WEIGHT;
-}
-
-function getSortValue(row: { impressions: number; clicks: number }, field: SortField) {
-  if (field === 'score') return priorityScore(row.impressions, row.clicks);
-  return row[field];
-}
 
 export default function DashboardPage() {
   const [userEmail, setUserEmail] = useState<string | null>(null);
@@ -140,12 +129,12 @@ export default function DashboardPage() {
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [overviewLoading, setOverviewLoading] = useState(false);
   const [companies, setCompanies] = useState<Company[]>([]);
-  const [sortField, setSortField] = useState<SortField>('score');
+  const [sortField, setSortField] = useState<SortField>('impressions');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [companyPage, setCompanyPage] = useState(0);
   const [companyNames, setCompanyNames] = useState<Record<string, string>>({});
   const [jobTitles, setJobTitles] = useState<JobTitle[]>([]);
-  const [jobTitleSortField, setJobTitleSortField] = useState<SortField>('score');
+  const [jobTitleSortField, setJobTitleSortField] = useState<SortField>('impressions');
   const [jobTitleSortDirection, setJobTitleSortDirection] = useState<SortDirection>('desc');
   const [jobTitlePage, setJobTitlePage] = useState(0);
   const [editingOrgId, setEditingOrgId] = useState<string | null>(null);
@@ -446,7 +435,7 @@ export default function DashboardPage() {
   }).filter((g) => g.rows.length > 0);
 
   const sortedCompanies = [...companies].sort((a, b) => {
-    const diff = getSortValue(a, sortField) - getSortValue(b, sortField);
+    const diff = a[sortField] - b[sortField];
     return sortDirection === 'desc' ? -diff : diff;
   });
 
@@ -457,7 +446,8 @@ export default function DashboardPage() {
     companyPage * COMPANIES_PER_PAGE + COMPANIES_PER_PAGE
   );
 
-  const maxCompanyScore = Math.max(1, ...companies.map((c) => priorityScore(c.impressions, c.clicks)));
+  const maxCompanyImpressions = Math.max(1, ...companies.map((c) => c.impressions));
+  const maxCompanyClicks = Math.max(1, ...companies.map((c) => c.clicks));
 
   const sortArrow = (field: SortField) => {
     if (sortField !== field) return '';
@@ -465,7 +455,7 @@ export default function DashboardPage() {
   };
 
   const sortedJobTitles = [...jobTitles].sort((a, b) => {
-    const diff = getSortValue(a, jobTitleSortField) - getSortValue(b, jobTitleSortField);
+    const diff = a[jobTitleSortField] - b[jobTitleSortField];
     return jobTitleSortDirection === 'desc' ? -diff : diff;
   });
 
@@ -476,7 +466,8 @@ export default function DashboardPage() {
     jobTitlePage * JOB_TITLES_PER_PAGE + JOB_TITLES_PER_PAGE
   );
 
-  const maxJobTitleScore = Math.max(1, ...jobTitles.map((t) => priorityScore(t.impressions, t.clicks)));
+  const maxJobTitleImpressions = Math.max(1, ...jobTitles.map((t) => t.impressions));
+  const maxJobTitleClicks = Math.max(1, ...jobTitles.map((t) => t.clicks));
 
   const jobTitleSortArrow = (field: SortField) => {
     if (jobTitleSortField !== field) return '';
@@ -932,11 +923,6 @@ export default function DashboardPage() {
               <p className="text-sm text-gray-400 mb-4">
                 Tag companies with real names as you identify them — it'll remember them everywhere.
               </p>
-              <p className="text-xs text-gray-400 mb-4 bg-gray-50 rounded p-2">
-                <strong>Priority Score</strong> = Impressions + (Clicks × {CLICK_WEIGHT}). A click is a far
-                stronger buying signal than a passive view, so it's weighted heavily — this is a ranking
-                heuristic to guide outreach order, not a measured probability.
-              </p>
               <table className="min-w-full">
                 <thead className="bg-gray-50">
                   <tr>
@@ -952,12 +938,6 @@ export default function DashboardPage() {
                       onClick={() => handleSort('clicks')}
                     >
                       Clicks{sortArrow('clicks')}
-                    </th>
-                    <th
-                      className="p-3 text-left text-sm text-gray-500 cursor-pointer select-none hover:text-gray-700"
-                      onClick={() => handleSort('score')}
-                    >
-                      Priority Score{sortArrow('score')}
                     </th>
                   </tr>
                 </thead>
@@ -1022,20 +1002,27 @@ export default function DashboardPage() {
                           </div>
                         )}
                       </td>
-                      <td className="p-3">{c.impressions.toLocaleString()}</td>
-                      <td className="p-3">{c.clicks.toLocaleString()}</td>
                       <td className="p-3 relative">
                         <div
                           className="absolute inset-y-1 left-0 rounded"
                           style={{
-                            width: `${(priorityScore(c.impressions, c.clicks) / maxCompanyScore) * 100}%`,
-                            backgroundColor: '#270428',
-                            opacity: 0.25,
+                            width: `${(c.impressions / maxCompanyImpressions) * 100}%`,
+                            backgroundColor: '#55d1bc',
+                            opacity: 0.4,
                           }}
                         />
-                        <span className="relative font-medium">
-                          {priorityScore(c.impressions, c.clicks).toLocaleString()}
-                        </span>
+                        <span className="relative">{c.impressions.toLocaleString()}</span>
+                      </td>
+                      <td className="p-3 relative">
+                        <div
+                          className="absolute inset-y-1 left-0 rounded"
+                          style={{
+                            width: `${(c.clicks / maxCompanyClicks) * 100}%`,
+                            backgroundColor: '#796ffb',
+                            opacity: 0.4,
+                          }}
+                        />
+                        <span className="relative">{c.clicks.toLocaleString()}</span>
                       </td>
                     </tr>
                   ))}
@@ -1077,10 +1064,6 @@ export default function DashboardPage() {
               <p className="text-sm text-gray-400 mb-4">
                 Pair this with the companies list to narrow down outreach targets.
               </p>
-              <p className="text-xs text-gray-400 mb-4 bg-gray-50 rounded p-2">
-                <strong>Priority Score</strong> = Impressions + (Clicks × {CLICK_WEIGHT}) — same ranking
-                heuristic as the companies table, weighted toward titles that actually clicked through.
-              </p>
               <table className="min-w-full">
                 <thead className="bg-gray-50">
                   <tr>
@@ -1097,32 +1080,33 @@ export default function DashboardPage() {
                     >
                       Clicks{jobTitleSortArrow('clicks')}
                     </th>
-                    <th
-                      className="p-3 text-left text-sm text-gray-500 cursor-pointer select-none hover:text-gray-700"
-                      onClick={() => handleJobTitleSort('score')}
-                    >
-                      Priority Score{jobTitleSortArrow('score')}
-                    </th>
                   </tr>
                 </thead>
                 <tbody>
                   {pagedJobTitles.map((t) => (
                     <tr key={t.titleId} className="border-t">
                       <td className="p-3">{t.name}</td>
-                      <td className="p-3">{t.impressions.toLocaleString()}</td>
-                      <td className="p-3">{t.clicks.toLocaleString()}</td>
                       <td className="p-3 relative">
                         <div
                           className="absolute inset-y-1 left-0 rounded"
                           style={{
-                            width: `${(priorityScore(t.impressions, t.clicks) / maxJobTitleScore) * 100}%`,
-                            backgroundColor: '#270428',
-                            opacity: 0.25,
+                            width: `${(t.impressions / maxJobTitleImpressions) * 100}%`,
+                            backgroundColor: '#55d1bc',
+                            opacity: 0.4,
                           }}
                         />
-                        <span className="relative font-medium">
-                          {priorityScore(t.impressions, t.clicks).toLocaleString()}
-                        </span>
+                        <span className="relative">{t.impressions.toLocaleString()}</span>
+                      </td>
+                      <td className="p-3 relative">
+                        <div
+                          className="absolute inset-y-1 left-0 rounded"
+                          style={{
+                            width: `${(t.clicks / maxJobTitleClicks) * 100}%`,
+                            backgroundColor: '#796ffb',
+                            opacity: 0.4,
+                          }}
+                        />
+                        <span className="relative">{t.clicks.toLocaleString()}</span>
                       </td>
                     </tr>
                   ))}
