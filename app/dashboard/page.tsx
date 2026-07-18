@@ -58,6 +58,12 @@ interface CampaignOverviewRow {
   spend: number;
 }
 
+interface FsGoal {
+  impressionsTarget: number | null;
+  clicksTarget: number | null;
+  spendTarget: number | null;
+}
+
 function formatDateLabel(dateStr: string) {
   const [year, month, day] = dateStr.split('-').map(Number);
   const date = new Date(year, month - 1, day);
@@ -139,6 +145,12 @@ export default function DashboardPage() {
   const [jobTitlePage, setJobTitlePage] = useState(0);
   const [editingOrgId, setEditingOrgId] = useState<string | null>(null);
   const [nameInput, setNameInput] = useState('');
+  const [goals, setGoals] = useState<Record<string, FsGoal>>({});
+  const [editingGoalTag, setEditingGoalTag] = useState<string | null>(null);
+  const [goalImpressionsInput, setGoalImpressionsInput] = useState('');
+  const [goalClicksInput, setGoalClicksInput] = useState('');
+  const [goalSpendInput, setGoalSpendInput] = useState('');
+  const [goalSaving, setGoalSaving] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [weeklyReportLoading, setWeeklyReportLoading] = useState(false);
   const reportRef = useRef<HTMLDivElement>(null);
@@ -180,6 +192,13 @@ export default function DashboardPage() {
       .then((res) => res.json())
       .then((data) => setCompanyNames(data.names || {}))
       .catch(() => setCompanyNames({}));
+  }, []);
+
+  useEffect(() => {
+    fetch('/api/fs-goals')
+      .then((res) => res.json())
+      .then((data) => setGoals(data.goals || {}))
+      .catch(() => setGoals({}));
   }, []);
 
   useEffect(() => {
@@ -327,6 +346,33 @@ export default function DashboardPage() {
       setEditingOrgId(null);
       setNameInput('');
     }
+  };
+
+  const startEditingGoal = (tag: string) => {
+    const g = goals[tag];
+    setGoalImpressionsInput(g?.impressionsTarget != null ? String(g.impressionsTarget) : '');
+    setGoalClicksInput(g?.clicksTarget != null ? String(g.clicksTarget) : '');
+    setGoalSpendInput(g?.spendTarget != null ? String(g.spendTarget) : '');
+    setEditingGoalTag(tag);
+  };
+
+  const saveGoal = async (tag: string) => {
+    setGoalSaving(true);
+    const newGoal: FsGoal = {
+      impressionsTarget: goalImpressionsInput ? Number(goalImpressionsInput) : null,
+      clicksTarget: goalClicksInput ? Number(goalClicksInput) : null,
+      spendTarget: goalSpendInput ? Number(goalSpendInput) : null,
+    };
+    const res = await fetch('/api/fs-goals', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fsTag: tag, ...newGoal }),
+    });
+    if (res.ok) {
+      setGoals((prev) => ({ ...prev, [tag]: newGoal }));
+      setEditingGoalTag(null);
+    }
+    setGoalSaving(false);
   };
 
   const handleSignOut = async () => {
@@ -739,6 +785,104 @@ export default function DashboardPage() {
             No Flagship Solution campaigns found.
           </div>
         ) : (
+          <>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+            {overviewGroups.map((group) => {
+              const goal = goals[group.tag];
+              const isEditingGoal = editingGoalTag === group.tag;
+              const goalRow = (
+                label: string,
+                actual: number,
+                target: number | null | undefined,
+                formatValue: (v: number) => string,
+                color: string
+              ) => {
+                if (!target || target <= 0) return null;
+                const pct = Math.min(100, Math.round((actual / target) * 100));
+                return (
+                  <div className="mb-2" key={label}>
+                    <div className="flex justify-between text-xs text-gray-500 mb-1">
+                      <span>{label}</span>
+                      <span>
+                        {formatValue(actual)} / {formatValue(target)} ({pct}%)
+                      </span>
+                    </div>
+                    <div className="w-full bg-gray-100 rounded-full h-2">
+                      <div
+                        className="h-2 rounded-full"
+                        style={{ width: `${pct}%`, backgroundColor: color }}
+                      />
+                    </div>
+                  </div>
+                );
+              };
+
+              const noGoalsSet =
+                !goal || (goal.impressionsTarget == null && goal.clicksTarget == null && goal.spendTarget == null);
+
+              return (
+                <div key={group.tag} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+                  <div className="flex justify-between items-center mb-3">
+                    <span className="font-bold text-sm">{group.label}</span>
+                    <button
+                      onClick={() => (isEditingGoal ? setEditingGoalTag(null) : startEditingGoal(group.tag))}
+                      className="text-xs text-gray-400 hover:text-gray-700 underline"
+                    >
+                      {isEditingGoal ? 'Cancel' : 'Edit Goals'}
+                    </button>
+                  </div>
+
+                  {isEditingGoal ? (
+                    <div className="flex flex-col gap-2">
+                      <label className="text-xs text-gray-400">
+                        Impressions target
+                        <input
+                          type="number"
+                          className="w-full p-1.5 border rounded text-sm mt-0.5"
+                          value={goalImpressionsInput}
+                          onChange={(e) => setGoalImpressionsInput(e.target.value)}
+                        />
+                      </label>
+                      <label className="text-xs text-gray-400">
+                        Clicks target
+                        <input
+                          type="number"
+                          className="w-full p-1.5 border rounded text-sm mt-0.5"
+                          value={goalClicksInput}
+                          onChange={(e) => setGoalClicksInput(e.target.value)}
+                        />
+                      </label>
+                      <label className="text-xs text-gray-400">
+                        Investment target (€)
+                        <input
+                          type="number"
+                          className="w-full p-1.5 border rounded text-sm mt-0.5"
+                          value={goalSpendInput}
+                          onChange={(e) => setGoalSpendInput(e.target.value)}
+                        />
+                      </label>
+                      <button
+                        onClick={() => saveGoal(group.tag)}
+                        disabled={goalSaving}
+                        className="text-xs text-white px-2 py-1.5 rounded font-medium disabled:opacity-50"
+                        style={{ backgroundColor: '#270428' }}
+                      >
+                        {goalSaving ? 'Saving…' : 'Save Goals'}
+                      </button>
+                    </div>
+                  ) : noGoalsSet ? (
+                    <p className="text-xs text-gray-400">No goals set yet for this Flagship Solution.</p>
+                  ) : (
+                    <div>
+                      {goalRow('Impressions', group.impressions, goal.impressionsTarget, (v) => v.toLocaleString(), '#55d1bc')}
+                      {goalRow('Clicks', group.clicks, goal.clicksTarget, (v) => v.toLocaleString(), '#796ffb')}
+                      {goalRow('Investment', group.spend, goal.spendTarget, (v) => `€${v.toFixed(2)}`, '#270428')}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
           <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
             <h3 className="font-bold mb-1">Campaign Overview</h3>
             <p className="text-sm text-gray-400 mb-4">
@@ -814,6 +958,7 @@ export default function DashboardPage() {
               </tbody>
             </table>
           </div>
+          </>
         )
       ) : compareMode ? (
         compareIds.length < 2 ? (
