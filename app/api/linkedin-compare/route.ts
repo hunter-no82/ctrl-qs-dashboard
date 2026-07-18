@@ -13,7 +13,8 @@ export async function GET(request: Request) {
 
   let start = new Date();
   const end = new Date();
-  if (range === 'week') start.setDate(end.getDate() - 7);
+  if (range === 'day') start.setDate(end.getDate() - 1);
+  else if (range === 'week') start.setDate(end.getDate() - 7);
   else if (range === 'last30') start.setDate(end.getDate() - 30);
   else if (range === 'all') start = new Date(2023, 0, 1);
 

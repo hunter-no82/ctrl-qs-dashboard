@@ -36,7 +36,7 @@ export async function GET(request: Request) {
 
   const url =
     `https://api.linkedin.com/rest/adAnalytics?q=analytics` +
-    `&pivot=MEMBER_COMPANY` +
+    `&pivot=MEMBER_JOB_TITLE` +
     `&timeGranularity=ALL` +
     `&dateRange=${dateRange}` +
     scopeParam +
@@ -58,28 +58,48 @@ export async function GET(request: Request) {
 
   const elements = data.elements || [];
 
-  const byOrg: Record<string, { orgId: string; impressions: number; clicks: number; profileUrl: string }> = {};
+  const byTitle: Record<string, { titleId: string; impressions: number; clicks: number }> = {};
 
   for (const el of elements) {
-    const orgUrn = el.pivotValues?.[0];
-    if (!orgUrn) continue;
+    const urn = el.pivotValues?.[0];
+    if (!urn) continue;
 
-    const orgId = orgUrn.split(':').pop();
-    if (!orgId) continue;
+    const titleId = urn.split(':').pop();
+    if (!titleId) continue;
 
-    if (!byOrg[orgId]) {
-      byOrg[orgId] = {
-        orgId,
-        impressions: 0,
-        clicks: 0,
-        profileUrl: `https://www.linkedin.com/company/${orgId}`,
-      };
+    if (!byTitle[titleId]) {
+      byTitle[titleId] = { titleId, impressions: 0, clicks: 0 };
     }
-    byOrg[orgId].impressions += el.impressions || 0;
-    byOrg[orgId].clicks += el.clicks || 0;
+    byTitle[titleId].impressions += el.impressions || 0;
+    byTitle[titleId].clicks += el.clicks || 0;
   }
 
-  const companies = Object.values(byOrg).sort((a, b) => b.impressions - a.impressions);
+  const topTitles = Object.values(byTitle)
+    .sort((a, b) => b.impressions - a.impressions)
+    .slice(0, 20);
 
-  return NextResponse.json({ companies });
+  if (topTitles.length === 0) {
+    return NextResponse.json({ jobTitles: [] });
+  }
+
+  const idsList = topTitles.map((t) => t.titleId).join(',');
+  const namesResponse = await fetch(`https://api.linkedin.com/v2/titles?ids=List(${idsList})&locale=en_US`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'LinkedIn-Version': '202607',
+      'X-Restli-Protocol-Version': '2.0.0',
+    },
+  });
+
+  const namesData = await namesResponse.json();
+  const results = namesData.results || {};
+
+  const jobTitles = topTitles.map((t) => ({
+    titleId: t.titleId,
+    name: results[t.titleId]?.name?.localized?.en_US || `Title (ID: ${t.titleId})`,
+    impressions: t.impressions,
+    clicks: t.clicks,
+  }));
+
+  return NextResponse.json({ jobTitles });
 }

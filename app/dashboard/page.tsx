@@ -42,6 +42,13 @@ interface Company {
   profileUrl: string;
 }
 
+interface JobTitle {
+  titleId: string;
+  name: string;
+  impressions: number;
+  clicks: number;
+}
+
 interface CampaignOverviewRow {
   id: number;
   name: string;
@@ -60,6 +67,7 @@ function formatDateLabel(dateStr: string) {
 }
 
 const rangeLabels: Record<string, string> = {
+  day: 'Last 24 hours',
   week: 'Last 7 days',
   last30: 'Last 30 days',
   all: 'Since beginning',
@@ -125,6 +133,10 @@ export default function DashboardPage() {
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [companyPage, setCompanyPage] = useState(0);
   const [companyNames, setCompanyNames] = useState<Record<string, string>>({});
+  const [jobTitles, setJobTitles] = useState<JobTitle[]>([]);
+  const [jobTitleSortField, setJobTitleSortField] = useState<SortField>('impressions');
+  const [jobTitleSortDirection, setJobTitleSortDirection] = useState<SortDirection>('desc');
+  const [jobTitlePage, setJobTitlePage] = useState(0);
   const [editingOrgId, setEditingOrgId] = useState<string | null>(null);
   const [nameInput, setNameInput] = useState('');
   const [pdfLoading, setPdfLoading] = useState(false);
@@ -224,6 +236,29 @@ export default function DashboardPage() {
   }, [sortField, sortDirection]);
 
   useEffect(() => {
+    if (compareMode || overviewMode) {
+      setJobTitles([]);
+      return;
+    }
+    const campaignParam = selectedCampaign
+      ? `&campaignId=${selectedCampaign}`
+      : selectedFsTag
+      ? `&campaignIds=${campaignIdsForTag(campaigns, selectedFsTag).join(',')}`
+      : '';
+    fetch(`/api/linkedin-job-titles?range=${range}${campaignParam}`)
+      .then((res) => res.json())
+      .then((data) => {
+        setJobTitles(data.jobTitles || []);
+        setJobTitlePage(0);
+      })
+      .catch(() => setJobTitles([]));
+  }, [selectedCampaign, selectedFsTag, campaigns, range, compareMode, overviewMode]);
+
+  useEffect(() => {
+    setJobTitlePage(0);
+  }, [jobTitleSortField, jobTitleSortDirection]);
+
+  useEffect(() => {
     if (!overviewMode || campaigns.length === 0) return;
     setDataLoading(true);
     setOverviewLoading(true);
@@ -268,6 +303,15 @@ export default function DashboardPage() {
     } else {
       setSortField(field);
       setSortDirection('desc');
+    }
+  };
+
+  const handleJobTitleSort = (field: SortField) => {
+    if (jobTitleSortField === field) {
+      setJobTitleSortDirection(jobTitleSortDirection === 'desc' ? 'asc' : 'desc');
+    } else {
+      setJobTitleSortField(field);
+      setJobTitleSortDirection('desc');
     }
   };
 
@@ -408,6 +452,26 @@ export default function DashboardPage() {
   const sortArrow = (field: SortField) => {
     if (sortField !== field) return '';
     return sortDirection === 'desc' ? ' ↓' : ' ↑';
+  };
+
+  const sortedJobTitles = [...jobTitles].sort((a, b) => {
+    const diff = a[jobTitleSortField] - b[jobTitleSortField];
+    return jobTitleSortDirection === 'desc' ? -diff : diff;
+  });
+
+  const JOB_TITLES_PER_PAGE = 20;
+  const totalJobTitlePages = Math.max(1, Math.ceil(sortedJobTitles.length / JOB_TITLES_PER_PAGE));
+  const pagedJobTitles = sortedJobTitles.slice(
+    jobTitlePage * JOB_TITLES_PER_PAGE,
+    jobTitlePage * JOB_TITLES_PER_PAGE + JOB_TITLES_PER_PAGE
+  );
+
+  const maxJobTitleImpressions = Math.max(1, ...jobTitles.map((t) => t.impressions));
+  const maxJobTitleClicks = Math.max(1, ...jobTitles.map((t) => t.clicks));
+
+  const jobTitleSortArrow = (field: SortField) => {
+    if (jobTitleSortField !== field) return '';
+    return jobTitleSortDirection === 'desc' ? ' ↓' : ' ↑';
   };
 
   return (
@@ -569,6 +633,7 @@ export default function DashboardPage() {
               value={range}
               onChange={(e) => setRange(e.target.value)}
             >
+              <option value="day">Last 24 Hours</option>
               <option value="week">Last 7 Days</option>
               <option value="last30">Last 30 Days</option>
               <option value="all">Since Beginning</option>
@@ -977,6 +1042,90 @@ export default function DashboardPage() {
                   <button
                     onClick={() => setCompanyPage((p) => Math.min(totalCompanyPages - 1, p + 1))}
                     disabled={companyPage >= totalCompanyPages - 1}
+                    className="px-3 py-1 rounded border bg-white disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
+                  >
+                    Next →
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {jobTitles.length > 0 && (
+            <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 mt-8">
+              <h3 className="font-bold mb-1">
+                {selectedCampaign
+                  ? `Job Titles Viewing ${selectedCampaignName}`
+                  : selectedFsTag
+                  ? `Job Titles Viewing ${fsTagLabel(selectedFsTag)}`
+                  : 'Job Titles Viewing Across All Flagship Solutions'}
+              </h3>
+              <p className="text-sm text-gray-400 mb-4">
+                Pair this with the companies list above to narrow down outreach targets.
+              </p>
+              <table className="min-w-full">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="p-3 text-left text-sm text-gray-500">Job Title</th>
+                    <th
+                      className="p-3 text-left text-sm text-gray-500 cursor-pointer select-none hover:text-gray-700"
+                      onClick={() => handleJobTitleSort('impressions')}
+                    >
+                      Impressions{jobTitleSortArrow('impressions')}
+                    </th>
+                    <th
+                      className="p-3 text-left text-sm text-gray-500 cursor-pointer select-none hover:text-gray-700"
+                      onClick={() => handleJobTitleSort('clicks')}
+                    >
+                      Clicks{jobTitleSortArrow('clicks')}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pagedJobTitles.map((t) => (
+                    <tr key={t.titleId} className="border-t">
+                      <td className="p-3">{t.name}</td>
+                      <td className="p-3 relative">
+                        <div
+                          className="absolute inset-y-1 left-0 rounded"
+                          style={{
+                            width: `${(t.impressions / maxJobTitleImpressions) * 100}%`,
+                            backgroundColor: '#55d1bc',
+                            opacity: 0.4,
+                          }}
+                        />
+                        <span className="relative">{t.impressions.toLocaleString()}</span>
+                      </td>
+                      <td className="p-3 relative">
+                        <div
+                          className="absolute inset-y-1 left-0 rounded"
+                          style={{
+                            width: `${(t.clicks / maxJobTitleClicks) * 100}%`,
+                            backgroundColor: '#796ffb',
+                            opacity: 0.4,
+                          }}
+                        />
+                        <span className="relative">{t.clicks.toLocaleString()}</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {totalJobTitlePages > 1 && (
+                <div className="flex justify-between items-center mt-4 text-sm text-gray-500">
+                  <button
+                    onClick={() => setJobTitlePage((p) => Math.max(0, p - 1))}
+                    disabled={jobTitlePage === 0}
+                    className="px-3 py-1 rounded border bg-white disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
+                  >
+                    ← Previous
+                  </button>
+                  <span>
+                    Page {jobTitlePage + 1} of {totalJobTitlePages}
+                  </span>
+                  <button
+                    onClick={() => setJobTitlePage((p) => Math.min(totalJobTitlePages - 1, p + 1))}
+                    disabled={jobTitlePage >= totalJobTitlePages - 1}
                     className="px-3 py-1 rounded border bg-white disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
                   >
                     Next →
