@@ -58,11 +58,50 @@ interface CampaignOverviewRow {
   spend: number;
 }
 
-interface FsGoal {
-  impressionsTarget: number | null;
-  clicksTarget: number | null;
-  spendTarget: number | null;
+interface FunnelThresholds {
+  awarenessReachPct: number;
+  awarenessFreq: number;
+  considerationEngagePct: number;
+  conversionLeadPct: number;
 }
+
+interface FunnelStageBase {
+  campaignCount: number;
+  activeCount: number;
+  progress: number | null;
+  status: 'not_started' | 'no_data' | 'in_progress' | 'complete';
+}
+
+interface FunnelFs {
+  tag: string;
+  label: string;
+  stages: {
+    awareness: FunnelStageBase & {
+      impressions: number;
+      reach: number;
+      audience: number;
+      penetration: number | null;
+      frequency: number;
+    };
+    consideration: FunnelStageBase & {
+      clicks: number;
+      targetClicks: number | null;
+      awarePool: number;
+    };
+    conversion: FunnelStageBase & {
+      leads: number;
+      targetLeads: number | null;
+      engagedPool: number;
+    };
+  };
+}
+
+const stageStatusConfig: Record<string, { label: string; color: string }> = {
+  not_started: { label: 'Not started', color: '#9ca3af' },
+  no_data: { label: 'No reach data', color: '#c98a1f' },
+  in_progress: { label: 'In progress', color: '#796ffb' },
+  complete: { label: 'Complete', color: '#2f9c86' },
+};
 
 function formatDateLabel(dateStr: string) {
   const [year, month, day] = dateStr.split('-').map(Number);
@@ -145,12 +184,13 @@ export default function DashboardPage() {
   const [jobTitlePage, setJobTitlePage] = useState(0);
   const [editingOrgId, setEditingOrgId] = useState<string | null>(null);
   const [nameInput, setNameInput] = useState('');
-  const [goals, setGoals] = useState<Record<string, FsGoal>>({});
-  const [editingGoalTag, setEditingGoalTag] = useState<string | null>(null);
-  const [goalImpressionsInput, setGoalImpressionsInput] = useState('');
-  const [goalClicksInput, setGoalClicksInput] = useState('');
-  const [goalSpendInput, setGoalSpendInput] = useState('');
-  const [goalSaving, setGoalSaving] = useState(false);
+  const [funnel, setFunnel] = useState<FunnelFs[]>([]);
+  const [funnelThresholds, setFunnelThresholds] = useState<Record<string, FunnelThresholds>>({});
+  const [funnelLoading, setFunnelLoading] = useState(false);
+  const [showFunnelInfo, setShowFunnelInfo] = useState(false);
+  const [editingThresholdTag, setEditingThresholdTag] = useState<string | null>(null);
+  const [thresholdInputs, setThresholdInputs] = useState({ reachPct: '', freq: '', engagePct: '', leadPct: '' });
+  const [thresholdSaving, setThresholdSaving] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [weeklyReportLoading, setWeeklyReportLoading] = useState(false);
   const reportRef = useRef<HTMLDivElement>(null);
@@ -195,11 +235,20 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => {
-    fetch('/api/fs-goals')
+    if (!overviewMode) return;
+    setFunnelLoading(true);
+    fetch('/api/funnel-progress')
       .then((res) => res.json())
-      .then((data) => setGoals(data.goals || {}))
-      .catch(() => setGoals({}));
-  }, []);
+      .then((data) => {
+        setFunnel(data.funnel || []);
+        setFunnelThresholds(data.thresholds || {});
+        setFunnelLoading(false);
+      })
+      .catch(() => {
+        setFunnel([]);
+        setFunnelLoading(false);
+      });
+  }, [overviewMode]);
 
   useEffect(() => {
     if (compareMode || overviewMode) return;
@@ -348,31 +397,38 @@ export default function DashboardPage() {
     }
   };
 
-  const startEditingGoal = (tag: string) => {
-    const g = goals[tag];
-    setGoalImpressionsInput(g?.impressionsTarget != null ? String(g.impressionsTarget) : '');
-    setGoalClicksInput(g?.clicksTarget != null ? String(g.clicksTarget) : '');
-    setGoalSpendInput(g?.spendTarget != null ? String(g.spendTarget) : '');
-    setEditingGoalTag(tag);
+  const startEditingThresholds = (tag: string) => {
+    const t = funnelThresholds[tag];
+    setThresholdInputs({
+      reachPct: t ? String(t.awarenessReachPct) : '65',
+      freq: t ? String(t.awarenessFreq) : '5',
+      engagePct: t ? String(t.considerationEngagePct) : '5',
+      leadPct: t ? String(t.conversionLeadPct) : '12',
+    });
+    setEditingThresholdTag(tag);
   };
 
-  const saveGoal = async (tag: string) => {
-    setGoalSaving(true);
-    const newGoal: FsGoal = {
-      impressionsTarget: goalImpressionsInput ? Number(goalImpressionsInput) : null,
-      clicksTarget: goalClicksInput ? Number(goalClicksInput) : null,
-      spendTarget: goalSpendInput ? Number(goalSpendInput) : null,
-    };
+  const saveThresholds = async (tag: string) => {
+    setThresholdSaving(true);
     const res = await fetch('/api/fs-goals', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fsTag: tag, ...newGoal }),
+      body: JSON.stringify({
+        fsTag: tag,
+        awarenessReachPct: thresholdInputs.reachPct ? Number(thresholdInputs.reachPct) : null,
+        awarenessFreq: thresholdInputs.freq ? Number(thresholdInputs.freq) : null,
+        considerationEngagePct: thresholdInputs.engagePct ? Number(thresholdInputs.engagePct) : null,
+        conversionLeadPct: thresholdInputs.leadPct ? Number(thresholdInputs.leadPct) : null,
+      }),
     });
     if (res.ok) {
-      setGoals((prev) => ({ ...prev, [tag]: newGoal }));
-      setEditingGoalTag(null);
+      // Re-fetch so progress is recomputed server-side against the new thresholds.
+      const data = await fetch('/api/funnel-progress').then((r) => r.json());
+      setFunnel(data.funnel || []);
+      setFunnelThresholds(data.thresholds || {});
+      setEditingThresholdTag(null);
     }
-    setGoalSaving(false);
+    setThresholdSaving(false);
   };
 
   const handleSignOut = async () => {
@@ -786,103 +842,207 @@ export default function DashboardPage() {
           </div>
         ) : (
           <>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-            {overviewGroups.map((group) => {
-              const goal = goals[group.tag];
-              const isEditingGoal = editingGoalTag === group.tag;
-              const goalRow = (
-                label: string,
-                actual: number,
-                target: number | null | undefined,
-                formatValue: (v: number) => string,
-                color: string
-              ) => {
-                if (!target || target <= 0) return null;
-                const pct = Math.min(100, Math.round((actual / target) * 100));
+          <div className="flex items-center gap-2 mb-3">
+            <h3 className="font-bold">Funnel Progress</h3>
+            <button
+              onClick={() => setShowFunnelInfo(true)}
+              aria-label="How is funnel progress calculated?"
+              className="w-5 h-5 rounded-full border border-gray-300 text-gray-400 text-xs hover:text-gray-700 hover:border-gray-500 leading-none font-medium"
+            >
+              i
+            </button>
+          </div>
+          {showFunnelInfo && (
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center p-6"
+              style={{ backgroundColor: 'rgba(39, 4, 40, 0.45)' }}
+              onClick={() => setShowFunnelInfo(false)}
+            >
+              <div
+                className="bg-white rounded-xl shadow-lg max-w-lg w-full p-6 max-h-[80vh] overflow-y-auto"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex justify-between items-start mb-3">
+                  <h3 className="font-bold" style={{ color: '#270428' }}>
+                    How Funnel Progress is measured
+                  </h3>
+                  <button
+                    onClick={() => setShowFunnelInfo(false)}
+                    className="text-gray-400 hover:text-gray-700 text-lg leading-none"
+                  >
+                    ×
+                  </button>
+                </div>
+                <div className="text-sm text-gray-600 flex flex-col gap-3">
+                  <p>
+                    Each campaign is classified by its LinkedIn objective: Brand Awareness campaigns make up
+                    the <strong>Awareness</strong> stage, Website Visit / Engagement campaigns are{' '}
+                    <strong>Consideration</strong>, and Lead Generation / Website Conversion campaigns are{' '}
+                    <strong>Conversion</strong>.
+                  </p>
+                  <p>
+                    <strong>Awareness</strong> isn't judged on clicks. In B2B, roughly 95% of your audience
+                    isn't in-market at any given moment (LinkedIn's "95-5 rule"), so this stage is about
+                    being remembered later. It's complete when enough of the target audience has seen the
+                    ads often enough: by default, 65% of the audience reached at an average frequency of 5
+                    (advertising research puts effective recall at 5–9 exposures). Progress is the weaker of
+                    the two requirements — you're only as done as whichever is furthest behind.
+                  </p>
+                  <p>
+                    <strong>Consideration</strong> is complete when clicks reach 5% (default) of the people
+                    the awareness stage actually reached. Each stage's target chains off the real output of
+                    the stage above it, not a fixed number.
+                  </p>
+                  <p>
+                    <strong>Conversion</strong> is complete when leads (lead-gen form fills plus website
+                    conversions) reach 12% (default) of consideration clicks, in line with LinkedIn
+                    lead-form completion benchmarks.
+                  </p>
+                  <p className="text-xs text-gray-400">
+                    Audience sizes and reach are LinkedIn approximations, and frequency is an average across
+                    reached members rather than a per-person guarantee. All thresholds are editable per
+                    Flagship Solution via "Edit thresholds" — treat the defaults as research-grounded
+                    starting points to calibrate with real results.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+          {funnelLoading ? (
+            <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 mb-6">
+              Calculating funnel progress from live reach data...
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4 mb-6">
+              {funnel.map((fs) => {
+                const isEditing = editingThresholdTag === fs.tag;
+                const t = funnelThresholds[fs.tag];
+                const aw = fs.stages.awareness;
+                const co = fs.stages.consideration;
+                const cv = fs.stages.conversion;
+
+                const stageBlock = (name: string, stage: FunnelStageBase, detail: string) => {
+                  const cfg = stageStatusConfig[stage.status];
+                  const pct = stage.progress != null ? Math.round(stage.progress * 100) : null;
+                  return (
+                    <div className="mb-3" key={name}>
+                      <div className="flex justify-between items-center text-xs mb-1">
+                        <span className="font-medium text-gray-700">{name}</span>
+                        <span className="flex items-center gap-2">
+                          <span
+                            className="text-white px-2 py-0.5 rounded-full font-medium"
+                            style={{ backgroundColor: cfg.color, fontSize: 10 }}
+                          >
+                            {cfg.label}
+                          </span>
+                          <span className="text-gray-500 w-9 text-right">{pct != null ? `${pct}%` : '—'}</span>
+                        </span>
+                      </div>
+                      <div className="w-full bg-gray-100 rounded-full h-2 mb-1">
+                        <div
+                          className="h-2 rounded-full"
+                          style={{ width: `${pct ?? 0}%`, backgroundColor: cfg.color }}
+                        />
+                      </div>
+                      <p className="text-xs text-gray-400">{detail}</p>
+                    </div>
+                  );
+                };
+
+                const awDetail =
+                  aw.campaignCount === 0
+                    ? 'No awareness campaigns.'
+                    : aw.penetration == null
+                    ? 'Reach data unavailable for this period.'
+                    : `Reach ${Math.round(aw.penetration * 100)}% of ${t?.awarenessReachPct ?? 65}% target · Frequency ${aw.frequency.toFixed(1)} of ${t?.awarenessFreq ?? 5}`;
+
+                const coDetail =
+                  co.campaignCount === 0
+                    ? 'No campaigns yet — typically retargeting the aware audience.'
+                    : co.targetClicks == null
+                    ? 'Awaiting awareness reach data to set the target.'
+                    : `${co.clicks.toLocaleString()} of ${co.targetClicks.toLocaleString()} target clicks (${t?.considerationEngagePct ?? 5}% of ${co.awarePool.toLocaleString()} aware members)`;
+
+                const cvDetail =
+                  cv.campaignCount === 0
+                    ? 'No campaigns yet.'
+                    : cv.targetLeads == null
+                    ? 'Awaiting consideration clicks to set the target.'
+                    : `${cv.leads.toLocaleString()} of ${cv.targetLeads.toLocaleString()} target leads (${t?.conversionLeadPct ?? 12}% of ${cv.engagedPool.toLocaleString()} engaged members)`;
+
                 return (
-                  <div className="mb-2" key={label}>
-                    <div className="flex justify-between text-xs text-gray-500 mb-1">
-                      <span>{label}</span>
-                      <span>
-                        {formatValue(actual)} / {formatValue(target)} ({pct}%)
-                      </span>
-                    </div>
-                    <div className="w-full bg-gray-100 rounded-full h-2">
-                      <div
-                        className="h-2 rounded-full"
-                        style={{ width: `${pct}%`, backgroundColor: color }}
-                      />
-                    </div>
-                  </div>
-                );
-              };
-
-              const noGoalsSet =
-                !goal || (goal.impressionsTarget == null && goal.clicksTarget == null && goal.spendTarget == null);
-
-              return (
-                <div key={group.tag} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
-                  <div className="flex justify-between items-center mb-3">
-                    <span className="font-bold text-sm">{group.label}</span>
-                    <button
-                      onClick={() => (isEditingGoal ? setEditingGoalTag(null) : startEditingGoal(group.tag))}
-                      className="text-xs text-gray-400 hover:text-gray-700 underline"
-                    >
-                      {isEditingGoal ? 'Cancel' : 'Edit Goals'}
-                    </button>
-                  </div>
-
-                  {isEditingGoal ? (
-                    <div className="flex flex-col gap-2">
-                      <label className="text-xs text-gray-400">
-                        Impressions target
-                        <input
-                          type="number"
-                          className="w-full p-1.5 border rounded text-sm mt-0.5"
-                          value={goalImpressionsInput}
-                          onChange={(e) => setGoalImpressionsInput(e.target.value)}
-                        />
-                      </label>
-                      <label className="text-xs text-gray-400">
-                        Clicks target
-                        <input
-                          type="number"
-                          className="w-full p-1.5 border rounded text-sm mt-0.5"
-                          value={goalClicksInput}
-                          onChange={(e) => setGoalClicksInput(e.target.value)}
-                        />
-                      </label>
-                      <label className="text-xs text-gray-400">
-                        Investment target (€)
-                        <input
-                          type="number"
-                          className="w-full p-1.5 border rounded text-sm mt-0.5"
-                          value={goalSpendInput}
-                          onChange={(e) => setGoalSpendInput(e.target.value)}
-                        />
-                      </label>
+                  <div key={fs.tag} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+                    <div className="flex justify-between items-center mb-3">
+                      <span className="font-bold text-sm">{fs.label}</span>
                       <button
-                        onClick={() => saveGoal(group.tag)}
-                        disabled={goalSaving}
-                        className="text-xs text-white px-2 py-1.5 rounded font-medium disabled:opacity-50"
-                        style={{ backgroundColor: '#270428' }}
+                        onClick={() =>
+                          isEditing ? setEditingThresholdTag(null) : startEditingThresholds(fs.tag)
+                        }
+                        className="text-xs text-gray-400 hover:text-gray-700 underline"
                       >
-                        {goalSaving ? 'Saving…' : 'Save Goals'}
+                        {isEditing ? 'Cancel' : 'Edit thresholds'}
                       </button>
                     </div>
-                  ) : noGoalsSet ? (
-                    <p className="text-xs text-gray-400">No goals set yet for this Flagship Solution.</p>
-                  ) : (
-                    <div>
-                      {goalRow('Impressions', group.impressions, goal.impressionsTarget, (v) => v.toLocaleString(), '#55d1bc')}
-                      {goalRow('Clicks', group.clicks, goal.clicksTarget, (v) => v.toLocaleString(), '#796ffb')}
-                      {goalRow('Investment', group.spend, goal.spendTarget, (v) => `€${v.toFixed(2)}`, '#270428')}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+
+                    {isEditing ? (
+                      <div className="flex flex-col gap-2">
+                        <label className="text-xs text-gray-400">
+                          Awareness: % of audience to reach
+                          <input
+                            type="number"
+                            className="w-full p-1.5 border rounded text-sm mt-0.5"
+                            value={thresholdInputs.reachPct}
+                            onChange={(e) => setThresholdInputs((p) => ({ ...p, reachPct: e.target.value }))}
+                          />
+                        </label>
+                        <label className="text-xs text-gray-400">
+                          Awareness: target average frequency
+                          <input
+                            type="number"
+                            className="w-full p-1.5 border rounded text-sm mt-0.5"
+                            value={thresholdInputs.freq}
+                            onChange={(e) => setThresholdInputs((p) => ({ ...p, freq: e.target.value }))}
+                          />
+                        </label>
+                        <label className="text-xs text-gray-400">
+                          Consideration: % of aware pool clicking
+                          <input
+                            type="number"
+                            className="w-full p-1.5 border rounded text-sm mt-0.5"
+                            value={thresholdInputs.engagePct}
+                            onChange={(e) => setThresholdInputs((p) => ({ ...p, engagePct: e.target.value }))}
+                          />
+                        </label>
+                        <label className="text-xs text-gray-400">
+                          Conversion: % of clicks becoming leads
+                          <input
+                            type="number"
+                            className="w-full p-1.5 border rounded text-sm mt-0.5"
+                            value={thresholdInputs.leadPct}
+                            onChange={(e) => setThresholdInputs((p) => ({ ...p, leadPct: e.target.value }))}
+                          />
+                        </label>
+                        <button
+                          onClick={() => saveThresholds(fs.tag)}
+                          disabled={thresholdSaving}
+                          className="text-xs text-white px-2 py-1.5 rounded font-medium disabled:opacity-50"
+                          style={{ backgroundColor: '#270428' }}
+                        >
+                          {thresholdSaving ? 'Saving…' : 'Save thresholds'}
+                        </button>
+                      </div>
+                    ) : (
+                      <div>
+                        {stageBlock('Awareness', aw, awDetail)}
+                        {stageBlock('Consideration', co, coDetail)}
+                        {stageBlock('Conversion', cv, cvDetail)}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
           <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
             <h3 className="font-bold mb-1">Campaign Overview</h3>
             <p className="text-sm text-gray-400 mb-4">

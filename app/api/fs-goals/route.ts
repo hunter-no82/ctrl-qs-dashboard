@@ -10,21 +10,30 @@ export async function GET() {
   const { data, error } = await supabase.from('fs_goals').select('*');
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  const goals: Record<string, { impressionsTarget: number | null; clicksTarget: number | null; spendTarget: number | null }> = {};
+  const thresholds: Record<
+    string,
+    {
+      awarenessReachPct: number | null;
+      awarenessFreq: number | null;
+      considerationEngagePct: number | null;
+      conversionLeadPct: number | null;
+    }
+  > = {};
   (data || []).forEach((row: any) => {
-    goals[row.fs_tag] = {
-      impressionsTarget: row.impressions_target,
-      clicksTarget: row.clicks_target,
-      spendTarget: row.spend_target,
+    thresholds[row.fs_tag] = {
+      awarenessReachPct: row.awareness_reach_pct,
+      awarenessFreq: row.awareness_freq,
+      considerationEngagePct: row.consideration_engage_pct,
+      conversionLeadPct: row.conversion_lead_pct,
     };
   });
 
-  return NextResponse.json({ goals });
+  return NextResponse.json({ thresholds });
 }
 
 export async function POST(request: Request) {
   const body = await request.json();
-  const { fsTag, impressionsTarget, clicksTarget, spendTarget } = body;
+  const { fsTag, awarenessReachPct, awarenessFreq, considerationEngagePct, conversionLeadPct } = body;
 
   if (!fsTag) {
     return NextResponse.json({ error: 'fsTag is required' }, { status: 400 });
@@ -32,9 +41,10 @@ export async function POST(request: Request) {
 
   const { error } = await supabase.from('fs_goals').upsert({
     fs_tag: fsTag,
-    impressions_target: impressionsTarget ?? null,
-    clicks_target: clicksTarget ?? null,
-    spend_target: spendTarget ?? null,
+    awareness_reach_pct: awarenessReachPct ?? null,
+    awareness_freq: awarenessFreq ?? null,
+    consideration_engage_pct: considerationEngagePct ?? null,
+    conversion_lead_pct: conversionLeadPct ?? null,
   });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
