@@ -85,6 +85,8 @@ interface FunnelFs {
     };
     consideration: FunnelStageBase & {
       clicks: number;
+      directClicks: number;
+      bankedClicks: number;
       targetClicks: number | null;
       awarePool: number;
     };
@@ -891,7 +893,9 @@ export default function DashboardPage() {
                   <p>
                     <strong>Consideration</strong> is complete when clicks reach 5% (default) of the people
                     the awareness stage actually reached. Each stage's target chains off the real output of
-                    the stage above it, not a fixed number.
+                    the stage above it, not a fixed number. Clicks earned on awareness content (like document
+                    ads) are "banked" toward this stage — someone who opened a doc has self-selected into
+                    interest, so that engagement counts even before a dedicated retargeting campaign launches.
                   </p>
                   <p>
                     <strong>Conversion</strong> is complete when leads (lead-gen form fills plus website
@@ -956,12 +960,14 @@ export default function DashboardPage() {
                     ? 'Reach data unavailable for this period.'
                     : `Reach ${Math.round(aw.penetration * 100)}% of ${t?.awarenessReachPct ?? 65}% target · Frequency ${aw.frequency.toFixed(1)} of ${t?.awarenessFreq ?? 5}`;
 
+                const bankedNote =
+                  co.bankedClicks > 0 ? ` · incl. ${co.bankedClicks.toLocaleString()} banked from awareness content` : '';
                 const coDetail =
-                  co.campaignCount === 0
+                  co.campaignCount === 0 && co.bankedClicks === 0
                     ? 'No campaigns yet — typically retargeting the aware audience.'
                     : co.targetClicks == null
                     ? 'Awaiting awareness reach data to set the target.'
-                    : `${co.clicks.toLocaleString()} of ${co.targetClicks.toLocaleString()} target clicks (${t?.considerationEngagePct ?? 5}% of ${co.awarePool.toLocaleString()} aware members)`;
+                    : `${co.clicks.toLocaleString()} of ${co.targetClicks.toLocaleString()} target clicks (${t?.considerationEngagePct ?? 5}% of ${co.awarePool.toLocaleString()} aware members)${bankedNote}`;
 
                 const cvDetail =
                   cv.campaignCount === 0

@@ -174,14 +174,18 @@ export async function GET() {
     }
 
     // Awareness: aggregate reach vs derived audience, plus average frequency.
+    // Clicks on awareness content (e.g. doc ads) are also captured as "banked
+    // engagement" — self-selected interest that counts toward consideration.
     let awImpressions = 0;
     let awReach = 0;
     let awAudience = 0;
+    let awClicks = 0;
     let awActiveCount = 0;
     for (const c of byStage.awareness) {
       const m = effectiveMetrics(c.id);
       if (!m) continue;
       awImpressions += m.impressions;
+      awClicks += m.clicks;
       if (m.reach != null && m.penetration != null && m.penetration > 0) {
         awReach += m.reach;
         awAudience += m.reach / m.penetration;
@@ -195,19 +199,31 @@ export async function GET() {
         ? null
         : Math.min(1, Math.min(awPenetration / (t.awarenessReachPct / 100), awFrequency / t.awarenessFreq));
 
-    // Consideration: clicks against a share of the actual aware pool.
-    let considClicks = 0;
+    // Consideration: clicks against a share of the actual aware pool. Direct
+    // clicks come from consideration campaigns; banked clicks are engagement
+    // already earned on awareness content, credited here so it isn't lost.
+    let directConsidClicks = 0;
     let considActiveCount = 0;
     for (const c of byStage.consideration) {
       const m = effectiveMetrics(c.id);
       if (!m) continue;
-      considClicks += m.clicks;
+      directConsidClicks += m.clicks;
       if (c.status === 'ACTIVE') considActiveCount++;
     }
+    const bankedClicks = awClicks;
+    const considClicks = directConsidClicks + bankedClicks;
+    const considHasActivity = byStage.consideration.length > 0 || bankedClicks > 0;
     const awarePool = awReach;
     const considTarget = awarePool > 0 ? Math.round(awarePool * (t.considerationEngagePct / 100)) : null;
     const considProgress =
-      byStage.consideration.length === 0 ? null : considTarget && considTarget > 0 ? Math.min(1, considClicks / considTarget) : null;
+      !considHasActivity ? null : considTarget && considTarget > 0 ? Math.min(1, considClicks / considTarget) : null;
+    const considStatus = !considHasActivity
+      ? 'not_started'
+      : considProgress == null
+      ? 'no_data'
+      : considProgress >= 1
+      ? 'complete'
+      : 'in_progress';
 
     // Conversion: leads against a share of actual consideration clicks.
     let convLeads = 0;
@@ -249,10 +265,12 @@ export async function GET() {
           campaignCount: byStage.consideration.length,
           activeCount: considActiveCount,
           clicks: considClicks,
+          directClicks: directConsidClicks,
+          bankedClicks,
           targetClicks: considTarget,
           awarePool,
           progress: considProgress,
-          status: status(byStage.consideration.length, considProgress),
+          status: considStatus,
         },
         conversion: {
           campaignCount: byStage.conversion.length,
